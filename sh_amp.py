@@ -63,15 +63,15 @@ class SH_AMP(Device):
         Initialize the device
         """
 
-        print "===== ANUDEVICES : HMA initialisation sh_amp.py 13/06/2012 ======="
-
+        print '####################################################'
+        print 'HMA initialisation sh_amp.py 13/06/2012'
         #Get amplifier settings from tree
 
         data, data2 = self.get_settings()
         #print data
 
-        print 'Coil Settings read Successfully::',
-        print 'Opening serial port::',
+        print ' Coil Settings read Successfully::',
+        print ' Opening serial port::',
 
         #try to open the serial port
         try:
@@ -79,13 +79,13 @@ class SH_AMP(Device):
         except serial.SerialException:
             raise RuntimeError('!!! EXCEPTION - Unable to open serial port - check no other program is using it')
             #exit("Unable to open the serial port!!! Check no other program is using it")
-        print 'Serial Port Open::'
+        print ' Serial Port Open::'
 
         #Send the ~Send Settings~ Command, and then send the settings themselves
         ser.flushInput()
         self.sendMicroCommand(ser, '7')
         ser.flushInput()
-        print 'Sending settings to micro::'
+        print ' Sending settings to micro::'
         for i in range(0,16):
             for j in range(0,6):
                 data[i][j]
@@ -97,16 +97,16 @@ class SH_AMP(Device):
         #print 'Echoed Values:'
         #print returnedData
         if returnedData==data2:                 #Check validity of Echoed Values
-            print 'ReturnedValuesCorrect::',
+            print ' ReturnedValuesCorrect::',
         else:
-            print 'ReturnedValuesIncorrect'
+            print ' ReturnedValuesIncorrect'
             ser.close()
             raise RuntimeError('!!! Echoed settings from Micro incorrect - Check serial communication to Micro')
 
         time.sleep(0.5)                         #Give the micro time to return to default state
 
         #Send ~Transmit To Amplifiers~ Command
-        print 'Transmit To Amplifiers::',
+        print ' Transmit To Amplifiers::',
         self.sendMicroCommand(ser, '3')
         self.sendMicroCommand(ser, '6')
 
@@ -117,14 +117,14 @@ class SH_AMP(Device):
         #print ser.read()
         ser.read()
         if test==1:
-            print 'Finished Transmitting - Success!!!!'
+            print ' Finished Transmitting - Success!!!!'
         else:
-            print 'Transmission Failed!!!!!'
+            print ' Transmission Failed!!!!!'
             ser.close()
             raise RuntimeError('!!! EXCEPTION - Transmit to amplifiers failed')
 
 
-        print 'Closing serial port'
+        print ' Closing serial port'
         ser.close()
         return 1
 
@@ -157,18 +157,20 @@ class SH_AMP(Device):
         """
         Store the data from the device
         """
-        print '============ ANUDEVICES Helical / Toroidal Mirnov Array Serial Connection - Post Shot======='
+        print '####################################################'
+        print 'HMA store sh_amp.py 13/06/2012'
+
         #Open the Serial Port
         try:
             ser=serial.Serial(0, 19200, timeout=1)
         except serial.SerialException:
             raise RuntimeError('!!! EXCEPTION - Unable to open serial port - check no other program is using it')
             #exit("Unable to open the serial port!!! Check no other program is using")
-        print 'Serial Port Open::',
+        print ' Serial Port Open::',
         ser.flushInput()
 
         #Send Transmit Command
-        print 'Transmit To Amplifiers::',
+        print ' Transmit To Amplifiers::',
         self.sendMicroCommand(ser, '3')
         self.sendMicroCommand(ser, '6')
 
@@ -178,14 +180,14 @@ class SH_AMP(Device):
         test=ord(ser.read())
         print ser.read()
         if test==1:
-            print 'TransmitSuccess'
+            print ' TransmitSuccess'
             #print 'Finished Transmitting - Success!!!!'
         else:
-            print 'Transmission Failed!!!!!'
+            print ' Transmission Failed!!!!!'
             raise RuntimeError('!!! EXCEPTION - Transmission failure')
             #exit("Transmission Failure Error From Micro")
 
-        print 'RetrieveAmpShotSettings::'
+        print ' RetrieveAmpShotSettings::'
         self.sendMicroCommand(ser, '6')
         self.waitForData(ser, 96)
         returnedData=map(ord,ser.read(96))
@@ -197,15 +199,15 @@ class SH_AMP(Device):
 
 
         if returnedData==data2:
-            print '=====================Success - Correct Return Values========'
+            print ' Success - Correct Return Values'
             returnedValueSuccess=1
         else:
-            print '======================Fail - Incorrect Return Values========'
+            print ' !!! Fail - Incorrect Return Values'
             raise RuntimeError('!!! EXCEPTION - ECHOED VALUES INCORRECT - WRONG AMPLIFIER SETTINGS DURING SHOT')
             returnedValueSuccess=0
 
         ser.close()
-        print 'Serial Port Closed'
+        print ' Serial Port Closed'
 
         linelength = 6
         n_loops = len(returnedData)/linelength
