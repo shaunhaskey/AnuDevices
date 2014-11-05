@@ -24,3 +24,4 @@ from tcp_ip_test import TCP_IP_TEST
 from test1 import TEST1
 from test2 import TEST2
 from test3 import TEST3
+from cro_agilent_3000 import CRO_AGILENT_3000
