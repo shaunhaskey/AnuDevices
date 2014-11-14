@@ -28,10 +28,14 @@ class cro():
         print 'connecting to host: %s:%d'%(self.host,self.port)
         self.soc.connect((self.host, self.port))
         print 'connected, sleep for some time....'
-        sleep(7)
+        #sleep(7)
         if not self.prompt:
             self.soc.send('*IDN?\n')
         welc = self.soc.recv(1000)
+        print welc
+        tmp = welc.split(',')
+        self.model = tmp[1]
+        print self.model
 
     def reset_cro(self):
         '''
@@ -112,7 +116,16 @@ class cro():
         plen=200
         sleep(1)
         preamble = self.soc.recv(plen)
+
+        #self.soc.send(":TIMebase:MODE?;RANGe?;DELay?;POSition?;SCALe?\n")
+        #print self.soc.recv(1000)
+
         nums = preamble.split(',')
+        print nums
+        data_format, mode_type, points, n_count, xinc, xor, xref, yinc, yor, yref = nums
+        print nums
+        self.X_array = np.arange(int(points)) * float(xinc) + float(xor)
+
         XArr=np.array(nums[4:7],dtype=float)
         YArr=np.array(nums[7:10],dtype=float)
                
@@ -133,15 +146,21 @@ class cro():
             self.soc.send(':FUNC:DISP 1\n')
 
         if fmt == '': return(pkt[0:-1])  # for debug
-        elif fmt.upper() == 'BYTE': typecode = 'B' # unsigned is B, 
-        elif fmt.upper() == 'WORD': typecode = 'H'  
+        elif fmt.upper() == 'BYTE': 
+            typecode = 'B' # unsigned is B, 
+            dtype = np.uint8
+        elif fmt.upper() == 'WORD': 
+            typecode = 'H'  
+            dtype = np.uint16
         else: raise ValueError('fmt of [{f}] not recognised - '
                                'use BYTE, WORD, ASCII (or "" for debug)'
                                .format(f=fmt))
         dat = Array(typecode)
         dat.fromstring(pkt[0:-1])
-        return({'data':dat,'preamble':
-                    {'XInc':XArr[0], 'YInc':YArr[0], 'YOff':YArr[1]}})
+        dat = np.array(dat,dtype=dtype)
+        scaled_dat = (np.array(dat) - float(yref)) * float(yinc) + float(yor)
+        return({'raw_data':dat, 'data':scaled_dat,'X_array':self.X_array,'preamble':
+                    {'raw_preamble':preamble, 'XInc':XArr[0], 'YInc':YArr[0], 'YOff':YArr[1], 'Xor':xor}})
                         
     def h5_save(self, filename, channels=['CHAN1'], samples=200000):
         import h5py
@@ -162,114 +181,138 @@ class cro():
 
 
 
-#class CRO_AGILENT_3000(Device):
-class CRO_AGILENT_3000():
+class CRO_AGILENT_3000(Device):
     '''Device to run the Agilent 3000 series cros
     SRH: 6Nov2014
     '''
-    #def __init__(self,host="192.168.1.151", port=5025):
     parts=[{'path':':HOSTIP','type':'text','value':'192.168.1.151:5025','options':('no_write_shot',)}]
     parts.append({'path':':INIT_ACTION','type':'action',
-                  'valueExpr':"Action(Dispatch('CAMAC_SERVER45_1','INIT',50, None),Method(None,'INIT',head))",
+                  'valueExpr':"Action(Dispatch('H1_SERVER_1','PULSE',50, None),Method(None,'INIT',head))",
                   'options':('no_write_shot',)})
     parts.append({'path':':STORE_ACTION','type':'action',
-                  'valueExpr':"Action(Dispatch('CAMAC_SERVER45_1','STORE',50,None),Method(None,'STORE',head))",
+                  'valueExpr':"Action(Dispatch('H1_SERVER_1','STORE',50,None),Method(None,'STORE',head))",
                   'options':('no_write_shot',)})
+    #parts.append({'path':':PULSE_ACTION','type':'action',
+    #              'valueExpr':"Action(Dispatch('CAMAC_SERVER45_1','PULSE', 50, None),Method(None,'PULSE',head))",
+    #              'options':('no_write_shot',)})
     for i in range(4):
-        parts.append({'path':':INPUT_%2.2d'%(i+1,),'type':'signal','options':('no_write_model','write_once',)})
-        parts.append({'path':':INPUT_%2.2d:RAW'%(i+1,),'type':'SIGNAL', 'options':('no_write_model','write_once')})
-        #parts.append({'path':':INPUT_%2.2d:START_IDX'%(i+1,),'type':'NUMERIC', 'options':('no_write_shot')})
-        #parts.append({'path':':INPUT_%2.2d:END_IDX'%(i+1,),'type':'NUMERIC', 'options':('no_write_shot')})
-        #parts.append({'path':':INPUT_%2.2d:INC'%(i+1,),'type':'NUMERIC', 'options':('no_write_shot')})
-
-    # parts.append({'path':'.PIMAX','type':'structure'})
-    # parts.append({'path':'.PIMAX:IMAGES','type':'numeric'})
-    # parts.append({'path':'.PIMAX:SETTINGS','type':'text'})
-    # parts.append({'path':'.PLL','type':'structure'})
-    # parts.append({'path':'.PLL:LOCKRANGE','type':'text'})
-    # parts.append({'path':'.SCAN','type':'structure'})
-    # parts.append({'path':'.SCAN:PHASES','type':'text'})
+        parts.append({'path':':INPUT_%2.2d'%(i+1,),'type':'signal',})
+        parts.append({'path':':INPUT_%2.2d:RAW'%(i+1,),'type':'SIGNAL',})
+    parts.append({'path':':SETTINGS','type':'text'})
+    parts.append({'path':':PREAMBLE','type':'text'})
 
     def init(self, arg):
-        '''initialise the labview device over a socket
-        SH:20Mar2013
+        '''Initialise the cro by setting it to single mode
+        SRH : 11Nov2014
         '''
-        pass
+        ip, port = self.hostip.record.split(':')
+        self.ip = ip
+        self.port = int(port)
+        try:
+            print self.settings.record
+            settings_list = self.settings.record.split('\n')
+            print settings_list
+        except:
+            print ' problem, modifying, using default'
+            settings_list = [':SING']
+        if len(settings_list)==0:
+            print ' problem, modifying'
+            settings_list = [':SING']
+        if len(settings_list[0])==0:
+            settings_list = [':SING']
+            print ' problem, modifying'
+        try:
+            self.rfcro = cro(host=self.ip, port=self.port)
+            for i in settings_list:
+                if len(i)>1:
+                    print ' sending : {}'.format(i)
+                    self.rfcro.soc.send(i+'\n')
+            #self.rfcro.soc.send(':SING\n')
+            self.rfcro.close_socket()
+        except:
+            self.rfcro.close_socket()
+            print "Failed to initialise cro!!!"
+            raise ValueError('!!! EXCEPTION - Failed to initialise the cro')
+        return 1
 
     INIT = init
-
     def store(self, arg):
         '''tell the pimax device it is time to store
         SH : 20Mar2013
         '''
-        #     ip, port = self.hostip.record.split(':')
-        #     self.ip = ip
-        #     self.port = int(port)
-        self.ip = "192.168.1.151"
-        self.port = 5025
-        self.rfcro = cro(host=self.ip, port=self.port)
         channels = ['CHAN{}'.format(i+1) for i in range(4)]
-        samples = 200000
-        import matplotlib.pyplot as pt
-        import numpy as np
-        fig, ax = pt.subplots(nrows = 4, sharex = True)
+        samples = 2000000
         datadict_list = []
-        for i, ch in enumerate(channels):
-            print 'retrieving {}.'.format(ch)
-            datadict_list.append(self.rfcro.retrieve(samples, ch, mode='MAX',fmt='BYTE'))
-        for i, datadict in enumerate(datadict_list):
-            ax[i].plot(np.array(datadict['data']))
-        fig.canvas.draw();fig.show()
+        try:
+            ip, port = self.hostip.record.split(':')
+            self.ip = ip
+            self.port = int(port)
+            #self.ip = "192.168.1.151"
+            #self.port = 5025
+            self.rfcro = cro(host=self.ip, port=self.port)
+        except:
+            print "  Failed to initialise cro, trying to close socket!!!"
+            self.rfcro.close_socket()
+            raise ValueError('!!! EXCEPTION - Failed to initialise the cro')
+        got_data = False
+        try:
+            for i, ch in enumerate(channels):
+                print 'retrieving {}.'.format(ch)
+                datadict_list.append(self.rfcro.retrieve(samples, ch, mode='MAX',fmt='BYTE'))
+                print 'samples:{}'.format(len(datadict_list[-1]['data']))
+            got_data = True
+            if len(datadict_list[-1]['data']) != samples: got_data = False
+        except:
+            print "  Failed to get data from the cro, trying to close socket!!!"
+            self.rfcro.close_socket()
+            raise ValueError('!!! EXCEPTION - Failed to get data from the cro')
 
-        #rfcro.h5_save('RF_{s}.h5'.format(s=shot), channels=['CHAN'+str(i) for i in [1,2,3,4]], samples=2000000)
-        #if single: 
-        #    rfcro.soc.send(':SING\n')
+        plot = False
+        if plot:
+            import matplotlib.pyplot as pt
+            import numpy as np
+            fig, ax = pt.subplots(nrows = 4, sharex = True)
+            for i, datadict in enumerate(datadict_list):
+                ax[i].plot(np.array(datadict['X_array'][::10]), np.array(datadict['data'][::10]))
+            fig.canvas.draw();fig.show()
 
-        self.rfcro.soc.send(':SING\n')
+        #self.rfcro.soc.send(':SING\n')
         self.rfcro.close_socket()
         
         #Start putting data into the tree
-        put_into_tree = False
-        if put_into_tree:
+        put_into_tree = True
+        if put_into_tree and got_data:
+            #fig, ax = pt.subplots(nrows = 4, sharex = True)
+            raw_preamble = datadict_list[0]['preamble']['raw_preamble']
+            nums = raw_preamble.split(',')
+            print nums
+            data_format, mode_type, points, n_count, xinc, xor, xref, yinc, yor, yref = nums
             for chan, datadict in enumerate(datadict_list):
                 chan_node = self.__getattr__('input_%2.2d' % (chan+1,))
                 chan_raw_node = self.__getattr__('input_%2.2d_raw' % (chan+1,))
-                #pnode = tr.getNode('\electr_dens::top.ne_het:ne_'+str(n+1))
-                #convExpr = MDS.Data.compile("0.35*$VALUE")
-                #dim = MDSplus.Dimension(MDSplus.Window(start, end, self.trig_src ), clock) 
-                #dat = MDSplus.Data.compile(
-                #    'build_signal(build_with_units((($1+ ($2-$1)*($value - -32768)/(32767 - -32768 ))), "V") ,build_with_units($3,"Counts"),$4)'
-                #    vins[chan*2], vins[chan*2+1], buf,dim)
-                rawMdsData = MDS.Float32Array(np.array(datadict['data']))
-                rawMdsData.setUnits("V")
-                convExpr.setUnits("V")
-                #build the signal object
-                signal = MDS.Signal(convExpr, rawMdsData, nd.dim_of())
-                chan_node.putData(signal)
+                #print chan_node, chan_raw_node
+                x_origin = float(datadict['preamble']['Xor'])
+                clock_period = datadict['preamble']['XInc']
+
+                data = datadict['raw_data']
+
+                #data = datadict['data']
+                #print x_origin, clock_period, len(data)
+                dim = Dimension(Window(0, len(data)-1, x_origin), Range(None, None, clock_period))
+                convExpr = Data.compile("{} * ($VALUE - {}) - {}".format(yinc, yref, yor))
+
+                #rawMdsData = Int16Array(reducedRawChan)
+                #rawMdsData.setUnits("counts")
+                #convExpr.setUnits("Volt")
+                sig = Signal(convExpr, data, dim)
+                #print dim
+                #print sig
+                #print sig.raw
+                if plot:
+                    ax[chan].plot(sig.dim_of().data()[::10], sig.data()[::10])
+                chan_node.putData(sig)
+            if plot:
+                fig.canvas.draw(); fig.show()
+        return 1
 
     STORE = store
-
-if __name__ == "__main__":
-    rfcro = cro()
-    
-    def torture(channels=['CHAN'+str(i) for i in [1,2,3,4]], 
-                samples=2000000, loops=100):
-        for l in range(loops):
-            for ch in channels: 
-                nw2=rfcro.retrieve(samples,ch,mode='MAX')
-    import sys
-    try:
-        shot = int(sys.argv[1])
-    except:
-        raise ValueError(' arg 1 must be a valid shot number ')
-
-    try:
-        single = int(sys.argv[2])
-    except:
-        single = 0
-
-    rfcro.h5_save('RF_{s}.h5'.format(s=shot), channels=['CHAN'+str(i) for i in [1,2,3,4]], samples=2000000)
-    if single: 
-        rfcro.soc.send(':SING\n')
-
-    rfcro.close_socket()
